@@ -57,6 +57,7 @@ class MkTemplateTemplate:
         self.__class__.TEMPLATES.add(self)
 
     def create_template(self):
+        print("Creating new template at %s" % self.directory_path)
         os.makedirs(self.directory_path, exist_ok=True)
         ignore_path = os.path.join(self.directory_path, '.ignore')
         dependencies_path = os.path.join(self.directory_path, '.dependencies')
