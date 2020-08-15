@@ -1,10 +1,11 @@
 #!/usr/bin/python
 import os
+import re
 import argparse
 import logging
 import shutil
 from fnmatch import fnmatch
-from jinja2 import FileSystemLoader, Template, Environment
+from jinja2 import FileSystemLoader, Template, Environment, meta
 
 
 l = logging.getLogger(name='mktemplate')
@@ -25,6 +26,25 @@ def get_file_offsets(path):
     return file_paths
 
 
+OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
+
+
+def parse_unknown_kwargs(args):
+    """Take in a list of the remainder args from argparse and tries to shove
+    them into a new parser. Args can be of the form ['--arg-name', 'argval'] or
+    '--arg-name=argval'. All args are forced to be strings"""
+    unknown_parser = argparse.ArgumentParser()
+    add_argument = unknown_parser.add_argument
+    for i in args:
+        match = re.match(OPTIONAL_ARGS_REXP, i)
+        if match is None:
+            continue
+
+        add_argument(match[0])
+
+    return unknown_parser.parse_args(args)
+
+
 class MkTemplateTemplate:
     TEMPLATES = set()
 
@@ -34,6 +54,7 @@ class MkTemplateTemplate:
         self.directory_path = os.path.join(self.template_directory, self.name)
         self.files = [] if files is None else files
         self.dependencies = [] if dependencies is None else dependencies
+        self.template_variables = []
         self.__class__.TEMPLATES.add(self)
 
     def create_template(self):
@@ -91,7 +112,7 @@ class MkTemplateTemplate:
             else:
                 files_to_copy.add(i)
 
-        jinja_files = set(i for i in files_to_use if fnmatch(i, '*.j2') is True)
+        # jinja_files = set(i for i in files_to_use if fnmatch(i, '*.j2') is True)
 
         template_loader = FileSystemLoader(searchpath=self.directory_path)
         template_env = Environment(loader=template_loader)
@@ -101,8 +122,8 @@ class MkTemplateTemplate:
             target_path = join(target_dir, file[:-3])
             template = template_env.get_template(file)
             rendered_template = template.render(**kwargs)
-            if os.path.isfile(target_path) is True:
-                l.info('Path %s already exists, not copying', target_path)
+            if os.path.isfile(target_path) is True and force is False:
+                l.warning('Path %s already exists, not copying', target_path)
                 continue
             with open(target_path, 'w') as f:
                 f.write(rendered_template)
@@ -114,11 +135,30 @@ class MkTemplateTemplate:
         for file in files_to_copy:
             source = join(self.directory_path, file)
             dest = join(target_dir, file)
-            if os.path.isfile(dest) is True:
+            if os.path.isfile(dest) is True and force is False:
                 continue
             check_dir = os.path.split(dest)[0]
             makedirs(check_dir, exist_ok=True)
             copy(source, dest)
+
+    def resolve_template_variables(self):
+        files_to_use = self.files
+        jinja_files = set()
+        for i in files_to_use:
+            if fnmatch(i, '*.j2') is True:
+                jinja_files.add(i)
+
+        template_env = Environment()
+        join = os.path.join
+        for file in jinja_files:
+            full_path = join(self.directory_path, file)
+            with open(full_path, 'r') as f:
+                template_source = f.read()
+
+            parsed_content = template_env.parse(template_source)
+            variables = meta.find_undeclared_variables(parsed_content)
+            variables_string = ', '.join(variables)
+            self.template_variables.append((file, variables_string))
 
     # def __del__(self):
     #     self.__class__.TEMPLATES.remove(self)
@@ -129,12 +169,15 @@ class MkTemplateTemplate:
                   ['Name: %s',
                    'Path: %s',
                    'Deps: %s',
-                   'Files: %s']
+                   'Files: %s',
+                   'File-Variable-map: \n%s']
                    ) + '\n'
+        file_variable_map = '\n'.join('%s: %s' % (f, v) for f, v in self.template_variables)
         return rep % (self.name,
                       self.directory_path,
                       ', '.join(i.name for i in self.dependencies),
-                      ', '.join(i for i in self.files))
+                      ', '.join(i for i in self.files),
+                      file_variable_map)
 
 
 def install_template(name, directory, template_directory):
@@ -151,6 +194,9 @@ def get_templates(template_directory, ignore_dependencies=False):
     for t in templates:
         t.resolve_dependencies()
 
+    for t in templates:
+        t.resolve_template_variables()
+
     return templates
 
 
@@ -164,8 +210,10 @@ def main(args):
             print(t)
     elif which == 'copy':
         templates_to_copy = [i for i in templates if i.name in args.template]
+        kwarg_namespace = parse_unknown_kwargs(args.args)
+        kwargs = vars(kwarg_namespace)
         for t in templates_to_copy:
-            t.template_to(args.target_directory, args.force)
+            t.template_to(args.target_directory, force=args.force, **kwargs)
     elif which == 'create':
         new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
         for t in new_templates:
@@ -182,6 +230,7 @@ if __name__ == '__main__':
     copy_parser = subparsers.add_parser('copy', help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used')
 
     copy_parser.add_argument('template', help='Template name to look for.', nargs="+", type=str)
+    copy_parser.add_argument('args', nargs=argparse.REMAINDER)
 
     list_parser = subparsers.add_parser('list', help='List files for template, do not copy')
 
@@ -212,6 +261,8 @@ if __name__ == '__main__':
                         help='Overwrite files of the same name if they exist in the output directory',
                         default=False)
 
+
+    # args = parser.parse_args()
     args = parser.parse_args()
 
     main(args)
