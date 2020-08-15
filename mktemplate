@@ -1,6 +1,5 @@
 #!/usr/bin/python
 import os
-import jinja2
 import argparse
 import logging
 import shutil
@@ -80,10 +79,46 @@ class MkTemplateTemplate:
                 l.warning('Missing dependency: %s', i.name)
         self.dependencies.extend(existing_deps)
 
-    def template_to(self, target_dir, force=False):
+    def template_to(self, target_dir, *args, force=False, **kwargs):
+        join = os.path.join
+        # add check to make sure that we aren't overwriting files
+        files_to_use = self.files
+        jinja_files = set()
+        files_to_copy = set()
+        for i in files_to_use:
+            if fnmatch(i, '*.j2') is True:
+                jinja_files.add(i)
+            else:
+                files_to_copy.add(i)
+
+        jinja_files = set(i for i in files_to_use if fnmatch(i, '*.j2') is True)
+
         template_loader = FileSystemLoader(searchpath=self.directory_path)
         template_env = Environment(loader=template_loader)
 
+        for file in jinja_files:
+            st = os.stat(join(self.directory_path, file))
+            target_path = join(target_dir, file[:-3])
+            template = template_env.get_template(file)
+            rendered_template = template.render(**kwargs)
+            if os.path.isfile(target_path) is True:
+                l.info('Path %s already exists, not copying', target_path)
+                continue
+            with open(target_path, 'w') as f:
+                f.write(rendered_template)
+            os.chmod(target_path, st.st_mode)
+
+        copy = shutil.copy
+        makedirs = os.makedirs
+
+        for file in files_to_copy:
+            source = join(self.directory_path, file)
+            dest = join(target_dir, file)
+            if os.path.isfile(dest) is True:
+                continue
+            check_dir = os.path.split(dest)[0]
+            makedirs(check_dir, exist_ok=True)
+            copy(source, dest)
 
     # def __del__(self):
     #     self.__class__.TEMPLATES.remove(self)
@@ -130,7 +165,7 @@ def main(args):
     elif which == 'copy':
         templates_to_copy = [i for i in templates if i.name in args.template]
         for t in templates_to_copy:
-            t.template_to(template_directory, args.force)
+            t.template_to(args.target_directory, args.force)
     elif which == 'create':
         new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
         for t in new_templates:
