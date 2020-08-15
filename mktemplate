@@ -82,6 +82,7 @@ class MkTemplateTemplate:
                 self.files.append(file)
 
     def resolve_dependencies(self):
+        # TODO: check for circular dependencies
         dependencies_path = os.path.join(self.directory_path, '.dependencies')
         l.debug('Reading .dependencies file for %s', self.directory_path)
         dependencies = []
@@ -102,6 +103,9 @@ class MkTemplateTemplate:
 
     def template_to(self, target_dir, *args, force=False, **kwargs):
         # TODO: Support dependency templating
+        for i in set(self.dependencies):
+            i.template_to(target_dir, *args, force=force, **kwargs)
+
         join = os.path.join
         # add check to make sure that we aren't overwriting files
         files_to_use = self.files
@@ -203,7 +207,7 @@ def install_template(src, dst, force=False):
 
 def get_templates(template_directory, ignore_dependencies=False):
     """Make MKTemplateTemplate objects from directory structure"""
-    template_dirs = os.listdir(template_directory)
+    template_dirs = [i for i in os.listdir(template_directory) if i != '.git']
     templates = [MkTemplateTemplate(name, template_directory) for name in template_dirs]
     for t in templates:
         t.resolve_files()
