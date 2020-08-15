@@ -248,7 +248,9 @@ def main(args):
 if __name__ == '__main__':
     description = """A general use templating script. Utilizes the Jinja2 templating
     module to quickly copy files from one place to another while filling in
-    user supplied variables.
+    user supplied variables. IMPORTANT: For Jinja2 templating to work correctly,
+    files that should be processed by Jinja2 before being copied must have .j2 at
+    the end of their filename.
 
     By default templates are stored in ~/.config/mktemplate_templates/"""
 
@@ -267,7 +269,7 @@ if __name__ == '__main__':
     to be used in Jinja2 templating. All provided flags MUST use optional flags
     E.g. --optional-flag"""
     copy_parser = subparsers.add_parser('copy',
-                                        help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used. ' + copy_arg_message)
+                                        help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used. Files with names that end in .j2 will be processed by Jinja2. ' + copy_arg_message)
 
     copy_parser.add_argument('template', help='Template name to look for/copy from', nargs="+", type=str)
     copy_parser.add_argument('args', nargs=argparse.REMAINDER,
