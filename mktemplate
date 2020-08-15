@@ -5,7 +5,7 @@ import argparse
 import logging
 import shutil
 from fnmatch import fnmatch
-from jinja2 import FileSystemLoader, Template, Environment, meta
+from jinja2 import FileSystemLoader, Environment, meta
 
 
 l = logging.getLogger(name='mktemplate')
@@ -13,6 +13,8 @@ handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(message)s'))
 l.addHandler(handler)
 l.setLevel(logging.WARNING)
+
+OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
 
 
 def get_file_offsets(path):
@@ -24,9 +26,6 @@ def get_file_offsets(path):
         root_offset = root[path_len:]
         extend([join(root_offset, i).lstrip('/') for i in files])
     return file_paths
-
-
-OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
 
 
 def parse_unknown_kwargs(args):
@@ -101,6 +100,7 @@ class MkTemplateTemplate:
         self.dependencies.extend(existing_deps)
 
     def template_to(self, target_dir, *args, force=False, **kwargs):
+        # TODO: Support dependency templating
         join = os.path.join
         # add check to make sure that we aren't overwriting files
         files_to_use = self.files
@@ -111,8 +111,6 @@ class MkTemplateTemplate:
                 jinja_files.add(i)
             else:
                 files_to_copy.add(i)
-
-        # jinja_files = set(i for i in files_to_use if fnmatch(i, '*.j2') is True)
 
         template_loader = FileSystemLoader(searchpath=self.directory_path)
         template_env = Environment(loader=template_loader)
@@ -180,8 +178,26 @@ class MkTemplateTemplate:
                       file_variable_map)
 
 
-def install_template(name, directory, template_directory):
-    ...
+def install_template(src, dst, force=False):
+    """Essentially a copytree operation from source to dest. Both should include
+    the name of the new template's directory regardless of whether that directory
+    already exists in the dest"""
+    files_to_copy = get_file_offsets(src)
+    copy = shutil.copy
+    makedirs = os.makedirs
+    join = os.path.join
+    makedirs(dst, exist_ok=True)
+
+    for path in files_to_copy:
+        source = join(src, path)
+        dest = join(dst, path)
+        if os.path.isfile(dest) is True and force is False:
+            continue
+        # make directories if they don't exist. this lets us use
+        # file offsets
+        check_dir = os.path.split(dest)[0]
+        makedirs(check_dir, exist_ok=True)
+        copy(source, dest)
 
 
 def get_templates(template_directory, ignore_dependencies=False):
@@ -203,7 +219,10 @@ def get_templates(template_directory, ignore_dependencies=False):
 def main(args):
     which = args.which
     template_directory = args.template_directory
+    target_directory = args.target_directory
     templates = get_templates(template_directory, args.ignore_dependencies)
+    join = os.path.join
+    force = args.force
 
     if which == 'list':
         for t in templates:
@@ -213,24 +232,46 @@ def main(args):
         kwarg_namespace = parse_unknown_kwargs(args.args)
         kwargs = vars(kwarg_namespace)
         for t in templates_to_copy:
-            t.template_to(args.target_directory, force=args.force, **kwargs)
+            t.template_to(target_directory, force=force, **kwargs)
     elif which == 'create':
         new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
         for t in new_templates:
             t.create_template()
     elif which == 'install':
         for name in args.template:
-            install_template(name, args.target_directory, template_directory)
+            src = join(target_directory, name)
+            dst = join(template_directory, name)
+            l.debug('Installing %s from %s to %s', name, target_directory, template_directory)
+            install_template(src, dst, force=force)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='A general use templating script')
+    description = """A general use templating script. Utilizes the Jinja2 templating
+    module to quickly copy files from one place to another while filling in
+    user supplied variables.
+
+    By default templates are stored in ~/.config/mktemplate_templates/"""
+
+    example_usage = """Examples:
+        mktemplate -o ./someone_elses_templates/ install pretty_template1 pretty_template2
+        mktemplate copy pwn --binary-path binary --remote-host=abc.xyz
+        mktemplate create newtemplate
+        mktemplate list
+        mktemplate -t ./someone_elses_templates/ list"""
+
+    parser = argparse.ArgumentParser(description=description,
+                                     epilog=example_usage,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers(required=True, dest='which')
+    copy_arg_message = """Any additional args provided will be treated as variables
+    to be used in Jinja2 templating. All provided flags MUST use optional flags
+    E.g. --optional-flag"""
+    copy_parser = subparsers.add_parser('copy',
+                                        help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used. ' + copy_arg_message)
 
-    copy_parser = subparsers.add_parser('copy', help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used')
-
-    copy_parser.add_argument('template', help='Template name to look for.', nargs="+", type=str)
-    copy_parser.add_argument('args', nargs=argparse.REMAINDER)
+    copy_parser.add_argument('template', help='Template name to look for/copy from', nargs="+", type=str)
+    copy_parser.add_argument('args', nargs=argparse.REMAINDER,
+                             help=copy_arg_message)
 
     list_parser = subparsers.add_parser('list', help='List files for template, do not copy')
 
@@ -261,8 +302,6 @@ if __name__ == '__main__':
                         help='Overwrite files of the same name if they exist in the output directory',
                         default=False)
 
-
-    # args = parser.parse_args()
     args = parser.parse_args()
 
     main(args)
