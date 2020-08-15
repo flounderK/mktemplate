@@ -1,0 +1,182 @@
+#!/usr/bin/python
+import os
+import jinja2
+import argparse
+import logging
+import shutil
+from fnmatch import fnmatch
+from jinja2 import FileSystemLoader, Template, Environment
+
+
+l = logging.getLogger(name='mktemplate')
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(message)s'))
+l.addHandler(handler)
+l.setLevel(logging.WARNING)
+
+
+def get_file_offsets(path):
+    file_paths = []
+    join = os.path.join
+    extend = file_paths.extend
+    path_len = len(path)
+    for root, dirs, files in os.walk(path):
+        root_offset = root[path_len:]
+        extend([join(root_offset, i).lstrip('/') for i in files])
+    return file_paths
+
+
+class MkTemplateTemplate:
+    TEMPLATES = set()
+
+    def __init__(self, name, template_directory, files=None, dependencies=None):
+        self.name = name
+        self.template_directory = template_directory
+        self.directory_path = os.path.join(self.template_directory, self.name)
+        self.files = [] if files is None else files
+        self.dependencies = [] if dependencies is None else dependencies
+        self.__class__.TEMPLATES.add(self)
+
+    def create_template(self):
+        os.makedirs(self.directory_path, exist_ok=True)
+        ignore_path = os.path.join(self.directory_path, '.ignore')
+        dependencies_path = os.path.join(self.directory_path, '.dependencies')
+        with open(ignore_path, 'a+') as f:
+            f.close()
+
+        with open(dependencies_path, 'a+') as f:
+            f.close()
+
+    def resolve_files(self):
+        ignore_path = os.path.join(self.directory_path, '.ignore')
+        ignored_files = ['.ignore', '.dependencies', '.git/*']
+        if os.path.isfile(ignore_path) is True:
+            l.debug('Reading .ignore file for %s', self.directory_path)
+            with open(ignore_path, 'r') as f:
+                ignored_files.extend(f.read().splitlines())
+        else:
+            l.warning('Path %s is missing .ignore file', self.directory_path)
+
+        for file in get_file_offsets(self.directory_path):
+            if not any(fnmatch(file, pat) for pat in ignored_files):
+                self.files.append(file)
+
+    def resolve_dependencies(self):
+        dependencies_path = os.path.join(self.directory_path, '.dependencies')
+        l.debug('Reading .dependencies file for %s', self.directory_path)
+        dependencies = []
+        if os.path.isfile(dependencies_path) is True:
+            with open(dependencies_path, 'r') as f:
+                dependencies = f.read().splitlines()
+        else:
+            l.warning('Path %s is missing .dependencies file', self.directory_path)
+        listdir = os.listdir(self.template_directory)
+        dependency_objects = [i for i in self.TEMPLATES if i.name in dependencies]
+        existing_deps = []
+        for i in dependency_objects:
+            if i.name in listdir:
+                existing_deps.append(i)
+            else:
+                l.warning('Missing dependency: %s', i.name)
+        self.dependencies.extend(existing_deps)
+
+    def template_to(self, target_dir, force=False):
+        template_loader = FileSystemLoader(searchpath=self.directory_path)
+        template_env = Environment(loader=template_loader)
+
+
+    # def __del__(self):
+    #     self.__class__.TEMPLATES.remove(self)
+    #     super().__del__()
+
+    def __repr__(self):
+        rep = '\n'.join(
+                  ['Name: %s',
+                   'Path: %s',
+                   'Deps: %s',
+                   'Files: %s']
+                   ) + '\n'
+        return rep % (self.name,
+                      self.directory_path,
+                      ', '.join(i.name for i in self.dependencies),
+                      ', '.join(i for i in self.files))
+
+
+def install_template(name, directory, template_directory):
+    ...
+
+
+def get_templates(template_directory, ignore_dependencies=False):
+    """Make MKTemplateTemplate objects from directory structure"""
+    template_dirs = os.listdir(template_directory)
+    templates = [MkTemplateTemplate(name, template_directory) for name in template_dirs]
+    for t in templates:
+        t.resolve_files()
+
+    for t in templates:
+        t.resolve_dependencies()
+
+    return templates
+
+
+def main(args):
+    which = args.which
+    template_directory = args.template_directory
+    templates = get_templates(template_directory, args.ignore_dependencies)
+
+    if which == 'list':
+        for t in templates:
+            print(t)
+    elif which == 'copy':
+        templates_to_copy = [i for i in templates if i.name in args.template]
+        for t in templates_to_copy:
+            t.template_to(template_directory, args.force)
+    elif which == 'create':
+        new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
+        for t in new_templates:
+            t.create_template()
+    elif which == 'install':
+        for name in args.template:
+            install_template(name, args.target_directory, template_directory)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='A general use templating script')
+    subparsers = parser.add_subparsers(required=True, dest='which')
+
+    copy_parser = subparsers.add_parser('copy', help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used')
+
+    copy_parser.add_argument('template', help='Template name to look for.', nargs="+", type=str)
+
+    list_parser = subparsers.add_parser('list', help='List files for template, do not copy')
+
+    create_parser = subparsers.add_parser('create',
+                        help='Create a new template in the template directory No effect if template already exists')
+
+    create_parser.add_argument('template', help='Template name to create', nargs='+', type=str)
+
+    install_parser = subparsers.add_parser('install',
+                        help='Install an existing template to the template directory')
+    install_parser.add_argument('template',
+                                help='Template name to copy from the target directory',
+                                nargs='+', type=str)
+
+    parser.add_argument('-t', '--template-directory',
+                        default=os.path.expanduser('~/.config/mktemplate_templates'),
+                        help='Directory to look for template files in')
+
+    parser.add_argument('-o', '--target-directory',
+                        default=os.getcwd(),
+                        help='Directory to output files in.')
+
+    parser.add_argument('-i', '--ignore-dependencies',
+                        help="Don't include any other dependencies marked in the .dependencies file",
+                        default=False, action='store_true')
+
+    parser.add_argument('-f', '--force', action='store_true',
+                        help='Overwrite files of the same name if they exist in the output directory',
+                        default=False)
+
+    args = parser.parse_args()
+
+    main(args)
