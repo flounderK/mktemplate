@@ -53,6 +53,7 @@ class MkTemplateTemplate:
         self.directory_path = os.path.join(self.template_directory, self.name)
         self.files = [] if files is None else files
         self.dependencies = [] if dependencies is None else dependencies
+        self.dependencies_recursive = set()
         self.template_variables = []
         self.__class__.TEMPLATES.add(self)
 
@@ -101,10 +102,11 @@ class MkTemplateTemplate:
                 l.warning('Missing dependency: %s', i.name)
         self.dependencies.extend(existing_deps)
 
-    def template_to(self, target_dir, *args, force=False, **kwargs):
+    def template_to(self, target_dir, *args, force=False, ignore_dependencies=False, **kwargs):
         # TODO: Support dependency templating
-        for i in set(self.dependencies):
-            i.template_to(target_dir, *args, force=force, **kwargs)
+        if ignore_dependencies is False:
+            for i in set(self.dependencies_recursive):
+                i.template_to(target_dir, *args, force=force, ignore_dependencies=True, **kwargs)
 
         join = os.path.join
         # add check to make sure that we aren't overwriting files
@@ -162,6 +164,22 @@ class MkTemplateTemplate:
             variables = meta.find_undeclared_variables(parsed_content)
             variables_string = ', '.join(variables)
             self.template_variables.append((file, variables_string))
+
+    def _get_dependencies_recursive(self):
+        seen = set()
+        to_check = set(i.name for i in self.dependencies)
+        while len(to_check) > 0:
+            dep_name = to_check.pop()
+            if dep_name in seen:
+                continue
+            seen.add(dep_name)
+            t = [i for i in self.TEMPLATES if i.name == dep_name][0]
+            self.dependencies_recursive.add(t)
+            for i in t.dependencies:
+                if i.name not in seen:
+                    to_check.add(i.name)
+
+        return seen
 
     # def __del__(self):
     #     self.__class__.TEMPLATES.remove(self)
@@ -234,10 +252,12 @@ def main(args):
             print(t)
     elif which == 'copy':
         templates_to_copy = [i for i in templates if i.name in args.template]
+        for t in templates_to_copy:
+            t._get_dependencies_recursive()
         kwarg_namespace = parse_unknown_kwargs(args.args)
         kwargs = vars(kwarg_namespace)
         for t in templates_to_copy:
-            t.template_to(target_directory, force=force, **kwargs)
+            t.template_to(target_directory, force=force, ignore_dependencies=args.ignore_dependencies, **kwargs)
     elif which == 'create':
         new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
         for t in new_templates:
