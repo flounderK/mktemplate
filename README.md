@@ -18,3 +18,6 @@ Examples:
         mktemplate list
         mktemplate -t ./someone_elses_templates/ list
 ```
+
+For examples of template directories, check out https://github.com/flounderk/mytemplates
+
