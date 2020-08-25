@@ -12,9 +12,10 @@ l = logging.getLogger(name='mktemplate')
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(message)s'))
 l.addHandler(handler)
-l.setLevel(logging.WARNING)
+l.setLevel(logging.DEBUG)
 
 OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
+POSITIONAL_ARGS_REXP = re.compile(r'^[A-Z0-9_]+$')
 
 
 def get_file_offsets(path):
@@ -41,7 +42,12 @@ def parse_unknown_kwargs(args):
 
         add_argument(match[0])
 
-    return unknown_parser.parse_args(args)
+    new_known_args, unknown_args = unknown_parser.parse_known_intermixed_args(args)
+
+    for i in unknown_args:
+        setattr(new_known_args, i, True)
+    l.debug('Extra args: %s', new_known_args)
+    return new_known_args
 
 
 class MkTemplateTemplate:
@@ -244,6 +250,11 @@ def main(args):
     template_directory = args.template_directory
     target_directory = args.target_directory
     templates = get_templates(template_directory, args.ignore_dependencies)
+    # quick check to make sure the user is warned if they provided a template that doesn't exist
+    found_template_names = set(t.name for t in templates)
+    if set(args.template).issubset(found_template_names) is False:
+        l.warn('One of the following templates does not exist %s', args.template)
+
     join = os.path.join
     force = args.force
 
@@ -330,5 +341,6 @@ if __name__ == '__main__':
                         default=False)
 
     args = parser.parse_args()
+    l.debug("All args %s", args)
 
     main(args)
