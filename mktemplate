@@ -12,7 +12,7 @@ l = logging.getLogger(name='mktemplate')
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(message)s'))
 l.addHandler(handler)
-l.setLevel(logging.DEBUG)
+l.setLevel(logging.WARNING)
 
 OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
 POSITIONAL_ARGS_REXP = re.compile(r'^[A-Z0-9_]+$')
