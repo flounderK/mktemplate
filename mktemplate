@@ -16,6 +16,7 @@ l.setLevel(logging.DEBUG)
 
 OPTIONAL_ARGS_REXP = re.compile(r'^--*([A-Za-z0-9_-]+)')
 POSITIONAL_ARGS_REXP = re.compile(r'^[A-Z0-9_]+$')
+ADDITIONAL_FILTERS = {'hex': hex}
 
 
 def get_file_offsets(path):
@@ -127,6 +128,8 @@ class MkTemplateTemplate:
 
         template_loader = FileSystemLoader(searchpath=self.directory_path)
         template_env = Environment(loader=template_loader)
+        for k, v in ADDITIONAL_FILTERS.items():
+            template_env.filters[k] = v
 
         for file in jinja_files:
             st = os.stat(join(self.directory_path, file))
@@ -160,6 +163,8 @@ class MkTemplateTemplate:
                 jinja_files.add(i)
 
         template_env = Environment()
+        for k, v in ADDITIONAL_FILTERS.items():
+            template_env.filters[k] = v
         join = os.path.join
         for file in jinja_files:
             full_path = join(self.directory_path, file)
