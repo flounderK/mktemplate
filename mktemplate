@@ -250,10 +250,6 @@ def main(args):
     template_directory = args.template_directory
     target_directory = args.target_directory
     templates = get_templates(template_directory, args.ignore_dependencies)
-    # quick check to make sure the user is warned if they provided a template that doesn't exist
-    found_template_names = set(t.name for t in templates)
-    if set(args.template).issubset(found_template_names) is False:
-        l.warn('One of the following templates does not exist %s', args.template)
 
     join = os.path.join
     force = args.force
@@ -262,13 +258,15 @@ def main(args):
         for t in templates:
             print(t)
     elif which == 'copy':
-        templates_to_copy = [i for i in templates if i.name in args.template]
-        for t in templates_to_copy:
-            t._get_dependencies_recursive()
+        template_to_copy = [i for i in templates if i.name == args.template]
+        if not template_to_copy:
+            l.warn('Cannot copy nonexistant template: %s', args.template)
+            quit(1)
+        template_to_copy = template_to_copy[0]
+        template_to_copy._get_dependencies_recursive()
         kwarg_namespace = parse_unknown_kwargs(args.args)
         kwargs = vars(kwarg_namespace)
-        for t in templates_to_copy:
-            t.template_to(target_directory, force=force, ignore_dependencies=args.ignore_dependencies, **kwargs)
+        template_to_copy.template_to(target_directory, force=force, ignore_dependencies=args.ignore_dependencies, **kwargs)
     elif which == 'create':
         new_templates = [MkTemplateTemplate(name, template_directory) for name in args.template]
         for t in new_templates:
@@ -307,7 +305,7 @@ if __name__ == '__main__':
     copy_parser = subparsers.add_parser('copy',
                                         help='Copy templates to your target directory. Files with the same name as existing files in the target directory will be ignored unless the --force flag is used. Files with names that end in .j2 will be processed by Jinja2. ' + copy_arg_message)
 
-    copy_parser.add_argument('template', help='Template name to look for/copy from', nargs="+", type=str)
+    copy_parser.add_argument('template', help='Template name to look for/copy from', type=str)
     copy_parser.add_argument('args', nargs=argparse.REMAINDER,
                              help=copy_arg_message)
 
