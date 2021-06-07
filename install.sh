@@ -1,9 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 
-install_path=~/.local/bin/
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+install_path="$HOME/.local/bin/"
 
 echo "Starting..."
-install -v -D -t $install_path mktemplate
+install -v -D -t $install_path "$SCRIPT_DIR/mktemplate"
 echo -e "Done!\n"
 
 
